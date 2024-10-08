@@ -4,83 +4,47 @@
 
 ### 介绍
 
-One-KVM 是基于廉价计算机硬件（目前为玩客云和 X64 兼容机）和PiKVM软件的硬件级远程控制项目。KVM over IP 可以远程管理服务器或工作站，实现无侵入式控制，无论被控机为什么操作系统或是否安装了操作系统，具有更广泛的适用性。此项目基于 [PiKVM](https://github.com/pikvm/pikvm)，和基于远控软件的远程管理方式不同，无需在被控电脑安装任何软件，实现无侵入式控制。
+One-KVM 是基于廉价计算机硬件和 [PiKVM]((https://github.com/pikvm/pikvm)) 软件二次开发的 BIOS 级远程控制项目。可以实现远程管理服务器或工作站，无需在被控机安装软件调整设置，实现无侵入式控制，适用范围广泛。
+
+演示网站：[https://kvmd-demo.mofeng.run](https://kvmd-demo.mofeng.run)
+
+![image-20240926220156381](https://github.com/user-attachments/assets/a7848bca-e43c-434e-b812-27a45fad7910)
+
 
 ### 快速开始
 
-**方式一：直刷 One-KVM 镜像**
+**方式一：Docker 镜像部署（推荐）**
+
+Docker 版本可以使用 OTG 或 CH9329 作为虚拟 HID ，支持 amd64、arm64、armv7 架构的 Linux 系统安装。
+
+
+如果使用 OTG 作为虚拟 HID，可以使用如下部署命令：
+```bash
+sudo docker run --name kvmd -itd --privileged=true \
+    -v /lib/modules:/lib/modules:ro -v /dev:/dev \
+    -v /sys/kernel/config:/sys/kernel/config -e OTG=1 \
+    -p 8080:8080 -p 4430:4430 -p 5900:5900 -p 623:623 \
+    silentwind0/kvmd
+```
+
+如果使用 CH9329，可以使用如下部署命令：
+```bash
+sudo docker run --name kvmd -itd \
+    --device /dev/video0:/dev/video0 \
+    --device /dev/ttyUSB0:/dev/ttyUSB0 \
+    -p 8080:8080 -p 4430:4430 -p 5900:5900 -p 623:623 \
+    silentwind0/kvmd
+```
+
+部署完成访问 https://IP:4430 ,点击信任自签证书，即可开始使用，默认账号密码：admin/admin。
+
+如无法访问可以使用 `sudo docker logs kvmd` 命令查看日志尝试修复、提交 issue 或在 QQ 群内寻求帮助。
+
+详细内容可以查阅 [One-KVM文档](https://one-kvm.mofeng.run/)。
+
+**方式二：直刷 One-KVM 镜像**
 
 对于玩客云设备，本项目 Releases 页可以找到适配玩客云的 One-KVM 预编译镜像。镜像名称带 One-KVM 前缀、burn 后缀的为线刷镜像，可使用 USB_Burning_Tool 软件线刷至玩客云。预编译线刷镜像为开箱即用，刷好后启动设备就可以开始使用 One-KVM。
-
-**方式二：One-KVM 脚本安装**
-
-适用于 arm 设备，在玩客云上经过测试。
-```bash
-git clone --depth=1 https://github.com/mofeng-git/One-KVM.git
-cd One-KVM
-sudo bash install.sh
-#第一阶段安装完成需要重启，再进行第二阶段安装
-sudo bash install.sh
-
-#可选功能：H.264 视频编码
-sudo bash kvmd_h264_install.sh
-```
-适用于 X86 设备，在 X64 主机上经过测试。
-```bash
-git clone --depth=1 https://github.com/mofeng-git/One-KVM.git
-cd One-KVM
-sudo bash install-x86.sh
-#第一阶段安装完成需要重启，再进行第二阶段安装
-sudo bash install-x86.sh
-
-#可选功能：H.264 视频编码
-sudo bash kvmd_h264_install.sh
-```
-
-**方式三：Docker 镜像部署**
-
-目前仅有 pikvm-ch9329_amd64，后续将支持更多控制方式和处理器架构。
-```bash
-#使用示例：
-docker run -itd -p443:443 -p80:80 --name pikvm-docker --device=/dev/ttyUSB0:/dev/kvmd-hid --device=/dev/video0:/dev/kvmd-video silentwind0/pikvm-ch9329:0.61
-```
-
-详细内容可以参照 [One-KVM文档](https://one-kvm.mofeng.run/)。
-
-### 功能特性
-
-主要功能比较，TinyPilot 社区版本、PiKVMv3 版本出现在这里仅做比较目的。
-|      功能      |         One-KVM         | TinyPilot 社区版本 | PiKVMv3版本  |
-| :------------: | :---------------------: | :----------------: | :----------: |
-| HTML5界面语言  |        简体中文         |        英文        |     英文     |
-|    BIOS控制    |            √            |         √          |      √       |
-|    视频捕捉    |            √            |         √          |      √       |
-|    音频捕捉    |            ×            |         √          |      √       |
-|  鼠键捕获类型  |       OTG CH9329        |        OTG         |  OTG CH9329  |
-|  从剪贴板粘贴  |            √            |         √          |      √       |
-|    OCR识别     |            √            |         ×          |      √       |
-|    LAN唤醒     |            √            |         ×          |      √       |
-|    VNC支持     |            √            |         ×          |      √       |
-|    HDMI环出    | √（含HDMI设备初步支持） |         ×          |      ×       |
-| 虚拟存储驱动器 |  √（仅含OTG设备支持）   |         ×          |      √       |
-|   ATX开关机    |  √（仅含GPIO设备支持）  |         ×          |      √       |
-|    板载WiFi    |            ×            |         √          |      √       |
-|   视频流格式   | MJPEG  H.264（软编码）  |    MJPEG, H.264    | MJPEG, H.264 |
-| 最大视频分辨率 |        1920x1080        |     1920x1080      |  1920x1080   |
-
-### 已测试设备
- - 玩客云
- - X64 主机
-
- 此脚本删除了对上游对树莓派设备的支持，如有需要请访问 [srepac/kvmd-armbian](https://github.com/srepac/kvmd-armbian/blob/master/install.sh)。
-
-### 其他
-
-目前此脚本基于[srepac/kvmd-armbian](https://github.com/srepac/kvmd-armbian/)项目重构了One-KVM安装脚本，做了如下修改：
-1. 适配玩客云，添加了初步CHROOT自动化支持
-2. 资源本地化，减小网络原因的影响
-3. 添加kvmd-ffmpeg和kvmd-display服务安装脚本
-4. HTML汉化和一些微调
 
 
 **赞助**
@@ -117,19 +81,20 @@ Will
 
 [远方](https://runyf.cn/)
 
+爱发电用户_399fc
+
+[斐斐の](https://www.mmuaa.com/)
+
 ......
 </details>
 
-**更新日志**
-
-[One-KVM/ChangeLogs.txt](https://github.com/mofeng-git/One-KVM/blob/main/ChangeLogs.txt)
-
-**Star历史**
-
-[![Star 历史](https://api.star-history.com/svg?repos=mofeng-git/One-KVM&type=Date)](https://star-history.com/#mofeng-git/One-KVM&Date)
-
-本项目间接或直接使用了下下列开源项目：
+本项目使用了下列开源项目：
 1. [pikvm/pikvm: Open and inexpensive DIY IP-KVM based on Raspberry Pi (github.com)](https://github.com/pikvm/pikvm)
-2. [hzyitc/armbian-onecloud: Armbian for onecloud. 玩客云用armbian (github.com)](https://github.com/hzyitc/armbian-onecloud/)
-3. [jacobbar/fruity-pikvm: Install Pi-KVM on debian SBCs such as Orange Pi, Banana Pi, Mango Pi, etc (github.com)](https://github.com/jacobbar/fruity-pikvm)
-4. [kvmd-armbian/install.sh at master · srepac/kvmd-armbian (github.com)](https://github.com/srepac/kvmd-armbian/blob/master/install.sh)
+
+**状态**
+
+[![Star History Chart](https://api.star-history.com/svg?repos=mofeng-git/One-KVM&type=Date)](https://star-history.com/#mofeng-git/One-KVM&Date)
+
+![Github](https://repobeats.axiom.co/api/embed/7cfaab47e31073107771a7179078aa2a6c3f1108.svg "Repobeats analytics image")
+
+

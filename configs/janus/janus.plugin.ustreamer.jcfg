@@ -1,0 +1,4 @@
+video: {
+	sink = "kvmd::ustreamer::h264"
+}
+
