@@ -1,0 +1,133 @@
+FROM registry.cn-hangzhou.aliyuncs.com/silentwind/kvmd-stage-0 AS builder
+
+FROM python:3.11.11-slim-bookworm
+
+LABEL maintainer="mofeng654321@hotmail.com"
+
+ARG TARGETARCH
+
+COPY --from=builder /tmp/lib/* /tmp/lib/
+COPY --from=builder /tmp/ustreamer/ustreamer /tmp/ustreamer/ustreamer-dump /usr/bin/janus /usr/bin/
+COPY --from=builder /tmp/wheel/*.whl /tmp/wheel/
+COPY --from=builder /tmp/ustreamer/libjanus_ustreamer.so /usr/lib/ustreamer/janus/
+COPY --from=builder /usr/lib/janus/transports/* /usr/lib/janus/transports/
+COPY --from=builder /tmp/arm64-libs.tar.gz* /tmp/
+RUN if [ ${TARGETARCH} = arm64 ] && [ -f /tmp/arm64-libs.tar.gz ]; then \
+        cd / && tar -xzf /tmp/arm64-libs.tar.gz && rm -f /tmp/arm64-libs.tar.gz; \
+    fi
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TZ=Asia/Shanghai
+
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libxkbcommon-x11-0 \
+        nginx \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        tesseract-ocr-chi-sim \
+        iptables \
+        sudo \
+        curl \
+        kmod \
+        libmicrohttpd12 \
+        libjansson4 \
+        libssl3 \
+        libsofia-sip-ua0 \
+        libglib2.0-0 \
+        libopus0 \
+        libogg0 \
+        libcurl4 \
+        libconfig9 \
+        libusrsctp2 \
+        libwebsockets17 \
+        libnss3 \
+        libasound2 \
+        libdrm2 \
+        libx264-164 \
+        libyuv0 \
+        nano \
+        unzip \
+    && case ${TARGETARCH} in \
+        amd64) \
+            apt-get install -y --no-install-recommends \
+                libavcodec59 libavformat59 libavutil57 \
+                libswscale6 libavfilter8 libavdevice59 \
+                ffmpeg vainfo \
+                libva2 libva-drm2 libva-x11-2 \
+                mesa-va-drivers mesa-vdpau-drivers \
+                intel-media-va-driver i965-va-driver \
+                ;; \
+        arm) \
+            apt-get install -y --no-install-recommends \
+                libavcodec59 libavformat59 libavutil57 \
+                libswscale6 libavfilter8 libavdevice59 \
+                v4l-utils libv4l-0 \
+                ;; \
+        arm64) \
+            apt-get install -y --no-install-recommends \
+                v4l-utils libv4l-0 libavutil57 \
+                libstdc++6 libavcodec59 libavformat59 \
+                libswscale6 libavfilter8 libavdevice59 \
+                libva2 libva-drm2 libva-x11-2 \
+                libvdpau1 ocl-icd-libopencl1 \
+                ;; \
+        *) \
+            echo "Unsupported architecture: ${TARGETARCH}" && exit 1 \
+            ;; \
+    esac \
+    && cp /tmp/lib/* /lib/*-linux-*/ \
+    && pip install --no-cache-dir --root-user-action=ignore --disable-pip-version-check /tmp/wheel/*.whl \
+    && pip install --no-cache-dir --root-user-action=ignore --disable-pip-version-check pyfatfs \
+    && if [ ${TARGETARCH} = arm ]; then ARCH=armhf; \
+       elif [ ${TARGETARCH} = arm64 ]; then ARCH=aarch64; \
+       elif [ ${TARGETARCH} = amd64 ]; then ARCH=x86_64; \
+       fi \
+    && curl https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.$ARCH -L -o /usr/local/bin/ttyd \
+    && chmod +x /usr/local/bin/ttyd \
+    && mkdir -p /tmp/gostc && cd /tmp/gostc \
+    && case ${TARGETARCH} in \
+        amd64) GOSTC_ARCH=amd64_v1 ;; \
+        arm) GOSTC_ARCH=arm_7 ;; \
+        arm64) GOSTC_ARCH=arm64_v8.0 ;; \
+        *) echo "Unsupported architecture for gostc: ${TARGETARCH}" && exit 1 ;; \
+    esac \
+    && curl -L https://github.com/mofeng-git/gostc-open/releases/download/v2.0.8-beta.2/gostc_linux_${GOSTC_ARCH}.tar.gz -o gostc.tar.gz \
+    && tar -xzf gostc.tar.gz \
+    && mv gostc /usr/bin/ \
+    && chmod +x /usr/bin/gostc \
+    && cd / && rm -rf /tmp/gostc \
+    && adduser kvmd --gecos "" --disabled-password \
+    && ln -sf /usr/share/tesseract-ocr/*/tessdata /usr/share/tessdata \
+    && mkdir -p /etc/kvmd_backup/override.d \
+               /var/lib/kvmd/msd/images \
+               /var/lib/kvmd/msd/meta \
+               /var/lib/kvmd/pst/data \
+               /var/lib/kvmd/msd/NormalFiles \
+               /opt/vc/bin \
+               /run/kvmd \
+               /tmp/kvmd-nginx \
+    && touch /run/kvmd/ustreamer.sock \
+    && groupadd kvmd-selfauth \
+    && usermod -a -G kvmd-selfauth root \
+	&& apt clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/lib /tmp/wheel \
+    && ustreamer -v
+
+COPY testenv/fakes/vcgencmd scripts/kvmd* /usr/bin/
+COPY extras/ /usr/share/kvmd/extras/
+COPY web/ /usr/share/kvmd/web/
+COPY scripts/kvmd-gencert /usr/share/kvmd/
+COPY build/platform/docker /usr/share/kvmd/platform
+COPY contrib/keymaps /usr/share/kvmd/keymaps
+COPY kvmd/ build/init.sh /kvmd/
+COPY configs/kvmd/ /etc/kvmd_backup/
+COPY configs/nginx/ /etc/kvmd_backup/nginx/
+COPY configs/janus/ /etc/kvmd_backup/janus/
+COPY configs/hw_info/ /etc/kvmd_backup/hw_info/
+COPY testenv/js/ /usr/share/janus/javascript/
+
+ENTRYPOINT ["/kvmd/init.sh"]

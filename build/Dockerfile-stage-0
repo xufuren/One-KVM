@@ -1,0 +1,202 @@
+# syntax = docker/dockerfile:experimental
+FROM debian:bookworm-slim AS builder
+
+ARG TARGETARCH
+
+# 设置环境变量
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    RUSTUP_DIST_SERVER="https://mirrors.tuna.tsinghua.edu.cn/rustup"
+
+# 更新源并安装依赖
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3-full \
+        python3-pip \
+        python3-dev \
+        build-essential \
+        libssl-dev \
+        libffi-dev \
+        python3-dev \
+        libevent-dev \
+        libjpeg-dev \
+        libbsd-dev \
+        libudev-dev \
+        git \
+        pkg-config \
+        wget \
+        curl \
+        libmicrohttpd-dev \
+        libjansson-dev \
+        libsofia-sip-ua-dev \
+        libglib2.0-dev \
+        libopus-dev \
+        libogg-dev \
+        libcurl4-openssl-dev \
+        liblua5.3-dev \
+        libconfig-dev \
+        libtool \
+        automake \
+        autoconf \
+        meson \
+        cmake \
+        libx264-dev \
+        libyuv-dev \
+        libasound2-dev \
+        libspeex-dev \
+        libspeexdsp-dev \
+        libusb-1.0-0-dev \
+        libldap2-dev \
+        libsasl2-dev \
+        libdrm-dev \
+        mesa-va-drivers \
+        mesa-vdpau-drivers \
+        v4l-utils \
+        libv4l-dev \
+        ffmpeg \
+        libavcodec-dev \
+        libavformat-dev \
+        libavutil-dev \
+        libswscale-dev \
+        libavfilter-dev \
+        libavdevice-dev \
+	&& if [ ${TARGETARCH} != arm ] && [ ${TARGETARCH} != arm64 ]; then \
+		apt-get install -y --no-install-recommends \
+			vainfo \
+			libva-dev \
+			libva-drm2 \
+			libva-x11-2 \
+			intel-media-va-driver \
+			i965-va-driver; \
+	fi \
+	&& if [ ${TARGETARCH} = arm64 ]; then \
+		apt-get install -y --no-install-recommends \
+			ninja-build \
+			zlib1g-dev \
+			libswresample-dev; \
+	fi \
+	&& apt clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY build/cargo_config /tmp/config
+
+# 配置 pip 源并安装 Python 依赖
+RUN --security=insecure pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+    && if [ ${TARGETARCH} = arm ]; then \
+        mkdir -p /root/.cargo \
+        && chmod 777 /root/.cargo && mount -t tmpfs none /root/.cargo \
+        && wget https://sh.rustup.rs -O /root/rustup-init.sh \
+        && sh /root/rustup-init.sh -y \
+        && export PATH=$PATH:/root/.cargo/bin \
+        && cp /tmp/config /root/.cargo/config.toml; \
+    fi \
+    && pip install --root-user-action=ignore --disable-pip-version-check --upgrade --break-system-packages build setuptools pip \
+    && pip wheel --wheel-dir=/tmp/wheel/ cryptography \
+    && pip wheel --wheel-dir=/tmp/wheel/ \
+        aiofiles aiohttp appdirs asn1crypto async_lru async-timeout bottle cffi \
+        chardet click colorama dbus_next gpiod hidapi idna mako marshmallow \
+        more-itertools multidict netifaces packaging passlib pillow ply psutil \
+        pycparser pyelftools pyghmi pygments pyparsing pyotp qrcode requests \
+        semantic-version setproctitle six spidev tabulate urllib3 wrapt xlib \
+        yarl pyserial pyyaml zstandard supervisor pyfatfs pyserial python-periphery \
+        python-ldap python-pam pyrad pyudev pyusb luma.oled pyserial-asyncio \
+    && rm -rf /root/.cache/pip/* /tmp/pip-* \
+    && if [ ${TARGETARCH} = arm ]; then \
+        umount /root/.cargo 2>/dev/null || true \
+        && rm -rf /root/.cargo /root/rustup-init.sh; \
+    fi
+
+# 编译 python evdev库
+RUN git clone --depth=1 https://github.com/gvalkov/python-evdev.git /tmp/python-evdev \
+    && cd /tmp/python-evdev \
+    && python3 setup.py bdist_wheel --dist-dir /tmp/wheel/ \
+    && rm -rf /tmp/python-evdev
+
+# 编译安装 libnice、libsrtp、libwebsockets 和 janus-gateway（显式 Release 与按架构优化）
+RUN export COMMON_CFLAGS='-O2 -pipe -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2' \
+    && if [ "${TARGETARCH}" = arm64 ]; then export CFLAGS="$COMMON_CFLAGS -march=armv8-a"; \
+       elif [ "${TARGETARCH}" = arm ]; then export CFLAGS="$COMMON_CFLAGS -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a7"; \
+       else export CFLAGS="$COMMON_CFLAGS -march=x86-64 -mtune=generic"; fi \
+    && export CXXFLAGS="$CFLAGS" LDFLAGS="-Wl,-O1 -Wl,--as-needed" \
+    && git clone --depth=1 https://gitlab.freedesktop.org/libnice/libnice /tmp/libnice \
+    && cd /tmp/libnice \
+    && meson setup build --prefix=/usr --buildtype=release -Doptimization=2 -Dc_args="$CFLAGS" -Dcpp_args="$CXXFLAGS" \
+    && ninja -C build && ninja -C build install \
+    && rm -rf /tmp/libnice \
+    && curl https://github.com/cisco/libsrtp/archive/v2.2.0.tar.gz -L -o /tmp/libsrtp-2.2.0.tar.gz \
+    && cd /tmp \
+    && tar xf libsrtp-2.2.0.tar.gz \
+    && cd libsrtp-2.2.0 \
+    && CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" ./configure --prefix=/usr --enable-openssl \
+    && make shared_library -j$(nproc) && make install \
+    && cd /tmp \
+    && rm -rf /tmp/libsrtp* \
+    && git clone --depth=1 https://github.com/warmcat/libwebsockets /tmp/libwebsockets \
+    && cd /tmp/libwebsockets \
+    && mkdir build && cd build \
+    && cmake -DLWS_MAX_SMP=1 -DLWS_WITHOUT_EXTENSIONS=0 -DCMAKE_INSTALL_PREFIX:PATH=/usr \
+             -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="$CFLAGS -fPIC" -DCMAKE_CXX_FLAGS_RELEASE="$CXXFLAGS -fPIC" .. \
+    && make -j$(nproc) && make install \
+    && cd /tmp \
+    && rm -rf /tmp/libwebsockets \
+    && git clone --depth=1 https://github.com/meetecho/janus-gateway.git /tmp/janus-gateway \
+    && cd /tmp/janus-gateway \
+    && sh autogen.sh \
+    && CFLAGS="$CFLAGS" CXXFLAGS="$CXXFLAGS" ./configure --enable-static --enable-websockets --enable-plugin-audiobridge \
+        --disable-data-channels --disable-rabbitmq --disable-mqtt --disable-all-plugins \
+        --disable-all-loggers --prefix=/usr \
+    && make  -j$(nproc) && make install \
+    && cd /tmp \
+    && rm -rf /tmp/janus-gateway
+
+# 编译 Rockchip MPP、RGA（仅 arm64，显式 Release 与按架构优化）
+RUN if [ ${TARGETARCH} = arm64 ]; then \
+        export COMMON_CFLAGS='-O2 -pipe -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2' \
+        && export CFLAGS="$COMMON_CFLAGS -march=armv8-a" \
+        && export CXXFLAGS="$CFLAGS" \
+    	&& git clone --depth=1 https://github.com/rockchip-linux/mpp.git /tmp/rkmpp \
+    	&& mkdir -p /tmp/rkmpp/rkmpp_build && cd /tmp/rkmpp/rkmpp_build \
+    	&& cmake -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON -DBUILD_TEST=OFF \
+                 -DCMAKE_C_FLAGS_RELEASE="$CFLAGS" -DCMAKE_CXX_FLAGS_RELEASE="$CXXFLAGS" .. \
+    	&& make -j$(nproc) \
+    	&& make install \
+    	&& git clone -b jellyfin-rga --depth=1 https://github.com/nyanmisaka/rk-mirrors.git /tmp/rkrga \
+    	&& cd /tmp/ \
+    	&& meson setup rkrga rkrga_build --prefix=/usr --libdir=lib --buildtype=release -Doptimization=2 \
+                 -Dc_args="$CFLAGS" -Dcpp_args="$CXXFLAGS -fpermissive" -Dlibdrm=false -Dlibrga_demo=false \
+    	&& meson configure rkrga_build > /dev/null \
+    	&& ninja -C rkrga_build install \
+        && rm -rf /tmp/rkmpp /tmp/rkrga; \
+    fi
+
+# 编译 ustreamer（按架构优化）
+RUN sed --in-place --expression 's|^#include "refcount.h"$|#include "../refcount.h"|g' /usr/include/janus/plugins/plugin.h \
+    && git clone --depth=1 https://github.com/mofeng-git/ustreamer /tmp/ustreamer \
+    && export COMMON_CFLAGS='-O2 -pipe -fPIC -fstack-protector-strong -D_FORTIFY_SOURCE=2' \
+    && if [ "${TARGETARCH}" = arm64 ]; then export CFLAGS="$COMMON_CFLAGS -march=armv8-a"; \
+       elif [ "${TARGETARCH}" = arm ]; then export CFLAGS="$COMMON_CFLAGS -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a7"; \
+       else export CFLAGS="$COMMON_CFLAGS -march=x86-64 -mtune=generic"; fi \
+    && export CXXFLAGS="$CFLAGS" \
+    && if [ ${TARGETARCH} = arm64 ]; then \
+        make -j$(nproc) CFLAGS="$CFLAGS" WITH_PYTHON=1 WITH_JANUS=1 WITH_FFMPEG=1 WITH_MPP=1 WITH_DRM=1 -C /tmp/ustreamer; \
+    else \
+        make -j$(nproc) CFLAGS="$CFLAGS" WITH_PYTHON=1 WITH_JANUS=1 WITH_FFMPEG=1 WITH_DRM=1 -C /tmp/ustreamer; \
+    fi \
+    && /tmp/ustreamer/ustreamer -v \
+    && /tmp/ustreamer/ustreamer-dump -v \
+    && cp /tmp/ustreamer/python/dist/*.whl /tmp/wheel/
+
+# 复制必要的库文件
+RUN mkdir /tmp/lib \
+    && cd /lib/*-linux-*/ \
+    && cp libevent_core-*.so.* libbsd.so.* libevent_pthreads-*.so.* libspeexdsp.so.* \
+       libevent-*.so.* libjpeg.so.* libyuv.so.* libnice.so.* \
+       /tmp/lib/ \
+    && find /usr/lib -name "libsrtp2.so.*" -exec cp {} /tmp/lib/ \; \
+    && find /usr/lib -name "libwebsockets.so.*" -exec cp {} /tmp/lib/ \; \
+    && [ "${TARGETARCH}" = "arm64" ] && \
+       find /usr/lib -name "libsw*.so.*" -exec cp {} /tmp/lib/ \; && \
+       find /usr/lib -name "libpostproc.so.*" -exec cp {} /tmp/lib/ \; && \
+       find /usr/lib -name "librockchip*" -exec cp {} /tmp/lib/ \; && \
+       find /usr/lib -name "librga.so.*" -exec cp {} /tmp/lib/ \; || true

@@ -1,0 +1,126 @@
+li.right.feature-disabled#msd-dropdown
+	a.menu-button(href="#")
+		+navbar_led("msd-led", "led-msd")
+		span(i18n="drive_menu") Drive
+	.menu#msd-menu
+		.text
+			b(i18n="drive_title") Mass Storage Drive: 
+			span#msd-status
+			br
+		hr
+		.hidden#msd-message-offline
+			+menu_message("warning", "Mass Storage Drive is offline", "msd-message-offline")
+			hr
+		.hidden#msd-message-image-broken
+			+menu_message("warning", "Current image is broken!", "msd-message-image-broken")
+				| Perhaps uploading was interrupted#[br]
+			hr
+		.hidden#msd-message-too-big-for-dvd
+			+menu_message("warning", "Current image is too big for DVD!", "msd-message-too-big-for-dvd")
+				| The maximum is 31.6GiB. Please switch to the Flash mode.
+			hr
+		.hidden#msd-message-out-of-storage
+			+menu_message("warning", "Current image is out of storage", "msd-message-out-of-storage")
+				| This image was connected manually using #[b kvmd-otgmsd]
+			hr
+		.hidden#msd-message-rw-enabled
+			+menu_message("warning", "Read-write mode is enabled", "msd-message-rw-enabled")
+				| Do not turn off PiKVM while this is active to prevent#[br]
+				| filesystem corruption. Use read-only mode where possible,#[br]
+				| as writing to SD card often can reduce its lifespan.
+			hr
+		.hidden#msd-message-downloads
+			+menu_message("info", "The image is being downloaded from One-KVM", "msd-message-downloads")
+				| Please wait
+			hr
+
+		table.kv
+			tr
+				td(i18n="drive_image") Image:
+				td(width="100%") #[select#msd-image-selector(disabled)]
+				td #[button#msd-download-button(disabled title="Download image") #[b &nbsp;&nbsp;&#x21E9;&nbsp;&nbsp;]]
+				td #[button#msd-remove-button(disabled title="Remove image") #[b &nbsp;&nbsp;&times;&nbsp;&nbsp;]]
+		table.kv
+			tr
+				+menu_radio_td2("msd-mode-radio", [
+					{title: "CD/DVD", value: "1", checked: true},
+					{title: "Flash", value: "0"},
+				]) Drive #[a(target="_blank" href="https://docs.pikvm.org/msd") mode]:
+				td &nbsp;
+				+menu_switch_td2("msd-rw-switch", false, false, "msd-rw-switch") Writable:
+			tr
+				td(i18n="drive_file_display") Files：
+				td
+					div.radio-box()
+						input#msd-mode-radio-image(checked type="radio" name="file-mode-radio" value="1")
+						label(for="msd-mode-radio-image" i18n="drive_image_files") ImageFiles
+						input#msd-mode-radio-file(type="radio" name="file-mode-radio" value="0")
+						label(for="msd-mode-radio-file" i18n="drive_normal_files") NormalFiles
+		hr
+
+		#msd-storages
+		hr
+		.buttons.buttons-row
+			button.row50#msd-select-new-button(disabled i18n="drive_select_upload") Select image to upload
+			button.row25#msd-upload-new-button(disabled i18n="drive_upload") Upload
+			button.row25#msd-abort-new-button(disabled i18n="drive_abort") Abort
+		.hidden#msd-message-another-user-uploads
+			+menu_message("info", "Another user uploads an image", "msd-message-another-user-uploads")
+			hr
+
+		.hidden#msd-new-sub
+			table.kv
+				tr
+					td(i18n="drive_local_file") Specify a local file:
+					td #[input#msd-new-file(type="file")]
+				tr
+					td(i18n="drive_paste_url") #[b Or] paste a URL:
+					td #[input#msd-new-url(type="text" style="width: 100%")]
+				tr.hidden#msd-new-part
+					td(i18n="drive_upload_partition") Upload partition:
+					td(width="100%") #[select#msd-new-part-selector]
+
+		.hidden#msd-uploading-sub
+			table.kv
+				tr
+					td(i18n="drive_new_image") New image:
+					td.value#msd-uploading-name
+				tr
+					td(i18n="drive_upload_size") Upload size:
+					td.value#msd-uploading-size
+			.text
+				.progress#msd-uploading-progress
+					span.progress-value#msd-uploading-progress-value
+			hr
+
+		.hidden#msd-new-tips
+			table.kv
+				tr
+					td.value(i18n="drive_note") Note:
+					td(i18n="drive_note_browser") &bull; Don't close the browser page until the upload is complete.
+				tr
+					td
+					td(i18n="drive_note_stream") &bull; To speed up the upload, close the stream window.
+		hr
+
+		.buttons.buttons-row
+			button.row50#msd-connect-button(disabled i18n="drive_connect") Connect drive to Server
+			button.row25#msd-disconnect-button(disabled i18n="drive_disconnect") Disconnect
+			button.row25#msd-reset-button(disabled i18n="drive_reset") Reset
+
+		hr
+
+		.text
+			b(i18n="drive_quick_transfer") Quick file transfer:
+			br
+			sub(i18n="drive_transfer_upload_note") &bull; Select NormalFiles tab to upload, package them and mount image
+			br
+			sub(i18n="drive_transfer_download_note") &bull; Disconnect MSD, unpackage it, select tab to download
+			br
+		hr
+		
+		div(class="buttons buttons-row")
+			button.row50#msd-file-image-update-button(i18n="drive_package_files") Package files into image
+			button.row50#msd-file-image-unzip-button(i18n="drive_unpackage_files") Unpackage files from image
+		hr
+		
